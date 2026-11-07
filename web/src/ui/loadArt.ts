@@ -8,6 +8,7 @@
 
 import { appleArt } from './appleArt.ts';
 import { StandardArt, type Manifest } from './standardArt.ts';
+import { sharpArt } from './sharpArt.ts';
 
 /**
  * The sheet and all that goes with it, fetched at once (the lettering, the runes' English, the caps): `font`, the
@@ -54,6 +55,29 @@ export async function loadAppleArt(tiles: Uint8Array, lettering: StandardArt | n
     // The player's own tiles, every one.
   }
   return appleArt(tiles, sheet, width, lettering);
+}
+
+/**
+ * The Apple ][ tiles (appleArt.ts): Ultima V's own Apple II tiles (apple2-u5-tiles.png), or the player's own `tiles` in
+ * the Apple's colours if the sheet cannot be had - lettered as `lettering` is.
+ */
+export async function loadSharpArt(tiles: Uint8Array, lettering: StandardArt | null): Promise<StandardArt> {
+  let sheet: Uint32Array | null = null;
+  let width = 0;
+  try {
+    const res = await fetch(`${import.meta.env.BASE_URL}graphics/sharp-x68000-u5-tiles.png`);
+    if (res.ok) {
+      const bitmap = await createImageBitmap(await res.blob());
+      const c = new OffscreenCanvas(bitmap.width, bitmap.height);
+      const x = c.getContext('2d')!;
+      x.drawImage(bitmap, 0, 0);
+      sheet = new Uint32Array(x.getImageData(0, 0, bitmap.width, bitmap.height).data.buffer.slice(0));
+      width = bitmap.width;
+    }
+  } catch {
+    // The player's own tiles, every one.
+  }
+  return sharpArt(tiles, sheet, width, lettering);
 }
 
 /**

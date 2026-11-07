@@ -9,7 +9,7 @@ import { egaTileArt } from './ui/egaTiles.ts';
 import { CARVE_STYLES, type CarveStyle } from './ui/carve.ts';
 import { drawCombatMarks } from './game/combat.ts';
 import { gameFiles } from './boot.ts';
-import { loadAppleArt, loadStandardArt, loadStandardFont } from './ui/loadArt.ts';
+import { loadAppleArt, loadStandardArt, loadSharpArt, loadStandardFont } from './ui/loadArt.ts';
 import { HI_HEIGHT, HI_WIDTH } from './ui/framebuffer.ts';
 import { readFont } from './data/font.ts';
 import { lzwDecompress } from './data/lzw.ts';
@@ -276,7 +276,9 @@ async function start(): Promise<void> {
       ? loadAppleArt(tiles, modern)
       : kind === 'pc-ega'
         ? Promise.resolve(egaTileArt(tiles, modern))
-        : Promise.resolve(null);
+        : kind === 'sharp'
+          ? loadSharpArt(tiles, modern)
+          : Promise.resolve(null);
   // The lettering's faces before the game draws a letter, so none is drawn the old way first (a few seconds at most).
   await Promise.race([screen.lettersLoaded, new Promise((r) => setTimeout(r, 4000))]);
   // How a dungeon sign's letters are cut into the wall: ?carve=paint, groove, vcut or fresh (for choosing among them).

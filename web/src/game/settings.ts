@@ -222,16 +222,17 @@ export type TileSet = 'standard' | 'original';
  * 1988 PC game drew them, each whole on black, in the Modern look's screen (egaTiles.ts). The PC (1988) look (tileSet
  * 'original') has a choice of its own (PcTiles).
  */
-export type Tiles = 'modern-pc' | 'apple2' | 'pc-ega';
-export const TILES: readonly Tiles[] = ['modern-pc', 'apple2', 'pc-ega'];
+export type Tiles = 'modern-pc' | 'apple2' | 'pc-ega' | 'sharp';
+export const TILES: readonly Tiles[] = ['modern-pc', 'apple2', 'pc-ega', 'sharp'];
 /** The PC (1988) look's tiles: the EGA tiles as the game drew them, or the Apple ][ set's in their place. */
-export type PcTiles = Extract<Tiles, 'pc-ega' | 'apple2'>;
-export const PC_TILES: readonly PcTiles[] = ['pc-ega', 'apple2'];
+export type PcTiles = Extract<Tiles, 'pc-ega' | 'apple2' | 'sharp'>;
+export const PC_TILES: readonly PcTiles[] = ['pc-ega', 'apple2', 'sharp'];
 
 export const TILES_NAMES: Record<Tiles, string> = {
   'modern-pc': 'Modern PC',
   apple2: 'Apple ][',
   'pc-ega': 'PC EGA',
+  'sharp': 'Sharp X68000'
 };
 
 /** The settings in use with no character: a fresh machine's, or the last character's once they are deleted. */
