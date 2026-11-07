@@ -1327,7 +1327,7 @@ export class Screen implements Platform {
   setTileArt(set: 'standard' | 'original', tiles: Tiles = this.tiles, outlines = this.outlines): void {
     this.tiles = tiles;
     this.outlines = outlines;
-    const ega = set === 'original' && tiles !== 'apple2';
+    const ega = set === 'original' && tiles !== 'apple2' && tiles !== 'sharp';
     const made = this.sets.get(tiles);
     if (ega) {
       // The EGA tiles themselves: no set to take up.
@@ -1351,8 +1351,9 @@ export class Screen implements Platform {
         },
       );
     }
-    const apple = !ega && set === 'original' && this.standard && this.standard === this.sets.get('apple2') ? this.standard : null;
-    this.fb.art = set === 'standard' && this.standard ? this.standard : apple ? new TilesAlone(apple) : new EgaArt(this.fb.tiles);
+    const tilesalone = !ega && set === 'original' && this.standard && (this.standard === this.sets.get('apple2') || this.standard === this.sets.get('sharp'))  ? this.standard : null;
+    this.fb.art = set === 'standard' && this.standard ? this.standard : tilesalone ? new TilesAlone(tilesalone) : new EgaArt(this.fb.tiles);
+    
     this.look = set;
     this.theme();
   }
