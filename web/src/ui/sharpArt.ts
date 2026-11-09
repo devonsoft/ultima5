@@ -240,6 +240,7 @@ export function sharpArt(tiles: Uint8Array, sheet: Uint32Array | null, width: nu
   const manifest: Manifest = { scroll: { 1: FLOW, 2: FLOW, 3: FLOW, 0x8f: FLOW } };
   const art = new StandardArt(cells, SHEET_COLUMNS * CELL, sheet ? manifest : {});
   art.squares = false;
+  art.forceGroundSquares = true;
   if (lettering) [art.font, art.runes, art.caps] = [lettering.font, lettering.runes, lettering.caps];
   if (!sheet) {
     art.useDerived(

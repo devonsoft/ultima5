@@ -227,6 +227,7 @@ export class StandardArt implements TileArt {
    * no ground drawn from the map (shores, worn earth, the soils' edges), the land below the world as it is above.
    */
   squares = false;
+  forceGroundSquares = false
 
   constructor(
     /** RGBA in memory order, SHEET_COLUMNS * CELL wide; grown a row at a time for cells made here (addCell). */
@@ -897,7 +898,7 @@ export class StandardArt implements TileArt {
     // The whole square is drawn for its place: a piece standing there (the rubble) is chosen by it as its land is.
     return this.placed(
       place ?? null,
-      () => (place && !this.squares && this.fromMap(tile, ground, place, tint)) || this.compose(tile, ground, tint, floor),
+      () => (place && !this.squares && !this.forceGroundSquares && this.fromMap(tile, ground, place, tint)) || this.compose(tile, ground, tint, floor),
     );
   }
 
