@@ -1,22 +1,31 @@
 // Updates from the GitHub releases (main.cjs), a few seconds after the window is up, each way as this copy allows:
-//   'auto'   - Windows installed by its installer, and the AppImage: electron-updater fetches a newer release in the
-//              background (the latest*.yml the release carries) and installs it when the game quits, or at once if
-//              the player restarts into it.
-//   'notice' - macOS and the Windows portable .exe, which electron-updater cannot replace (macOS installs an update
-//              only into an app signed by an Apple developer; this one is not): the player is told a newer release
-//              is out and offered its page, to read what changed and download from. Signing the Mac app would make it
-//              'auto' (issue #1).
+//   'auto'   - Windows installed by its installer, the AppImage, and the Mac app a release build signed with the
+//              Developer ID certificate (macSigning.cjs marks it selfUpdate) run from Applications: electron-updater
+//              fetches a newer release in the background (the latest*.yml the release carries; on a Mac its .zip) and
+//              installs it when the game quits, or at once if the player restarts into it. Where it fails - a Mac
+//              refusing the new app, say - the newer release is told of instead, as 'notice' does.
+//   'notice' - the Windows portable .exe, and a Mac app electron-updater cannot replace: one signed ad hoc (a local
+//              or a fork's build; macOS installs an update only into an app signed by an Apple developer), or run
+//              from anywhere but Applications (the disk image, read-only; Downloads, where macOS runs a read-only
+//              copy of it): the player is told a newer release is out and offered its page, to read what changed and
+//              download from.
 //   'flatpak' - the Flatpak: through Flatpak's update portal (flatpakUpdates.cjs), the newer release pulled from the
 //              site's repository and deployed, a restart playing it - so a Steam Deck in Game Mode is kept up to date
 //              without Discover, which runs only in Desktop Mode. Where the portal cannot be had or the update fails,
 //              a notice instead: under Game Mode with no page offered, only the way to update - the once-only approval
 //              given in Desktop Mode where that is what failed (flatpakUpdates.cjs reason), else Discover.
 //   'none'   - the app run unpackaged (development); or --no-update-check.
+// --no-auto-update makes any copy a 'notice': a newer release is told of, as for the portable .exe, and nothing is
+// downloaded or installed - for players who would choose when to update (the Flatpak's Discover still updates it).
 // What there is is told to the page (preload.cjs u5native.updates; web/src/ui/updates.ts), which says so in the
 // game's own way - a line in the title menu, and once a version a box over the title - and asks for the restart or
 // the page from here. Under Steam's Game Mode no page is offered (a browser there leaves the game behind); a build
-// downloaded is still installed when the game quits. A failure to look (offline, GitHub down) is only logged.
-const { readFileSync, writeFileSync } = require('node:fs');
+// downloaded is still installed when the game quits. Launched by Steam, a copy never restarts itself (Steam would see
+// the game end and the new one start outside its overlay and saves): what comes down is installed as the game quits,
+// and the Flatpak's installed update is started by the player, from Steam again. A failure to look (offline, GitHub
+// down) is only logged.
+const fs = require('node:fs');
+const { readFileSync, writeFileSync } = fs;
 const flatpakUpdates = require('./flatpakUpdates.cjs');
 
 const OWNER = 'synthwave-pixel';
@@ -24,13 +33,27 @@ const REPO = 'ultima5';
 const RELEASES = `https://github.com/${OWNER}/${REPO}/releases/latest`;
 const LATEST_API = `https://api.github.com/repos/${OWNER}/${REPO}/releases/latest`;
 
-/** How this copy is updated: 'auto', 'notice', 'flatpak' or 'none' (see above). */
-function updateKind({ packaged, platform, env, argv }) {
+/**
+ * How this copy is updated: 'auto', 'notice', 'flatpak' or 'none' (see above). `selfUpdate`: a Mac release build
+ * signed for it; `inApplications`: a Mac app run from Applications (app.isInApplicationsFolder).
+ */
+function updateKind({ packaged, platform, env, argv, selfUpdate = false, inApplications = false }) {
   if (!packaged || argv.includes('--no-update-check')) return 'none';
+  if (argv.includes('--no-auto-update')) return 'notice';
   if (env.FLATPAK_ID || env.container === 'flatpak') return 'flatpak';
   if (platform === 'win32') return env.PORTABLE_EXECUTABLE_DIR ? 'notice' : 'auto';
   if (platform === 'linux') return env.APPIMAGE ? 'auto' : 'notice';
+  if (platform === 'darwin') return selfUpdate && inApplications ? 'auto' : 'notice';
   return 'notice';
+}
+
+/** Whether this build was signed to replace itself (macSigning.cjs puts selfUpdate in the packaged package.json). */
+function signedForUpdates() {
+  try {
+    return require('./package.json').selfUpdate === true;
+  } catch {
+    return false;
+  }
 }
 
 /** A version's numbers (1.1.12, v1.1.12): major, minor, patch; a pre-release (1.1.0-dev.x) ranks below its release. */
@@ -120,36 +143,59 @@ async function latestRelease(net) {
 /**
  * Look for an update, as this copy allows (updateKind). `electron` is the main process's (app, net); `quiet` true
  * under Game Mode, where no page is offered. `file`, where the version last told of is kept (updates.json).
- * `flatpak`, the portal's (flatpakUpdates.cjs; the tests give their own).
+ * `flatpak`, the portal's (flatpakUpdates.cjs; the tests give their own). `steam` true in a Steam launch (steam.cjs
+ * isSteamLaunch): no restart is offered or made. `selfUpdate`, whether a Mac build was signed to replace itself (the
+ * packaged package.json's, signedForUpdates; the tests give their own).
  */
-async function checkForUpdates({ electron, quiet, file, flatpak = flatpakUpdates }) {
+async function checkForUpdates({ electron, quiet, file, flatpak = flatpakUpdates, steam = false, selfUpdate = signedForUpdates() }) {
   const { app, net } = electron;
   const kind = updateKind({
     packaged: app.isPackaged,
     platform: process.platform,
     env: process.env,
     argv: process.argv,
+    selfUpdate,
+    inApplications: process.platform === 'darwin' && Boolean(app.isInApplicationsFolder?.()),
   });
   if (kind === 'none') return;
-  if (kind === 'flatpak') return flatpakUpdate({ app, net, quiet, file, flatpak });
+  if (kind === 'flatpak') return flatpakUpdate({ app, net, quiet, steam, file, flatpak });
   if (kind === 'auto') {
     const { autoUpdater } = require('electron-updater');
     autoUpdater.autoDownload = true;
     autoUpdater.autoInstallOnAppQuit = true;
-    autoUpdater.on('error', (e) => console.warn('update:', e?.message ?? e));
+    // Pre-releases are for testers, who install them by hand: nothing updates to one.
+    autoUpdater.allowPrerelease = false;
+    // Failed - offline, or a Mac refusing the new app - the newer release told of instead, once, unless one has come
+    // down already.
+    let downloaded = false;
+    let fellBack = false;
+    const failed = (e) => {
+      console.warn('update:', e?.message ?? e);
+      if (downloaded || fellBack) return;
+      fellBack = true;
+      void tellOfRelease({ app, net, quiet, file });
+    };
+    autoUpdater.on('error', failed);
     autoUpdater.on('update-downloaded', (info) => {
+      downloaded = true;
       console.log(`update: ${info.version} downloaded, installed on quitting`);
       publish({
         kind: 'restart',
+        // In a Steam launch, installed as the game quits and no more: the offer says so (web/src/game/intro.ts).
+        ...(steam ? { onQuit: true } : {}),
         version: String(info.version),
         current: app.getVersion(),
         told: false,
       });
     });
-    await autoUpdater.checkForUpdates().catch((e) => console.warn('update:', e?.message ?? e));
+    await autoUpdater.checkForUpdates().catch(failed);
     return;
   }
-  // A notice: the newest release, from GitHub's API.
+  await tellOfRelease({ app, net, quiet, file });
+}
+
+/** A notice: the newest release, from GitHub's API, told of where newer than this copy (none under Game Mode). */
+async function tellOfRelease({ app, net, quiet, file }) {
   if (quiet) return;
   try {
     const latest = await latestRelease(net);
@@ -181,7 +227,7 @@ function notice(latest, current, file, page, why) {
  * a newer release - and the game told when it is installed; where the portal cannot be had or the update fails, the
  * release told of instead (under Game Mode, without its page).
  */
-async function flatpakUpdate({ app, net, quiet, file, flatpak }) {
+async function flatpakUpdate({ app, net, quiet, steam, file, flatpak }) {
   const current = app.getVersion();
   let latest = null;
   try {
@@ -193,7 +239,7 @@ async function flatpakUpdate({ app, net, quiet, file, flatpak }) {
   const fallback = (why) => newer && notice(latest, current, file, !quiet, why);
   const portal = await flatpak.connect();
   if (!portal) return void fallback();
-  relaunch = quiet ? null : portal.spawnLatest;
+  relaunch = quiet || steam ? null : portal.spawnLatest;
   try {
     monitor = await flatpak.watch({
       portal,
@@ -208,7 +254,7 @@ async function flatpakUpdate({ app, net, quiet, file, flatpak }) {
         publish({
           kind: 'restart',
           installed: true,
-          quits: quiet,
+          quits: quiet || steam,
           ...(newer ? { version: latest } : {}),
           current,
           told: false,
@@ -245,19 +291,27 @@ function closeUpdates() {
  * Take up the offer: the restart into the build come down (the Flatpak's: its newest version started, and this one
  * quits - or, under Game Mode, only the quit), or the release's page in the player's browser.
  */
-function applyUpdate({ electron }) {
+function applyUpdate({ electron, steam = false }) {
   if (!offer) return false;
+  // In a Steam launch a downloaded build installs as the game quits, never by a restart.
+  if (steam && offer.kind === 'restart' && !offer.installed) return false;
   if (offer.kind === 'restart' && offer.installed) {
     const quit = () => electron.app.quit();
-    if (relaunch)
+    if (relaunch && !steam)
       void relaunch().then(quit, (e) => {
         console.warn('update: the new version would not start:', e?.message ?? e);
         quit();
       });
     else quit();
   } else if (offer.kind === 'restart') require('electron-updater').autoUpdater.quitAndInstall();
-  else if (offer.page !== false) void electron.shell.openExternal(RELEASES);
-  else return false;
+  else return openRelease(electron, offer);
+  return true;
+}
+
+/** The release's page opened in the player's browser, where one is offered. */
+function openRelease(electron, from) {
+  if (from.page === false) return false;
+  void electron.shell.openExternal(RELEASES);
   return true;
 }
 

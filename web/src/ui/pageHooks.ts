@@ -12,6 +12,8 @@ import type { Game } from '../game/game.ts';
 import { LOST_FOCUS, Pad } from '../game/io.ts';
 import { effectsOf, saveOptions, soundtrackOf, type Options } from '../game/settings.ts';
 import { clearInstalled } from '../install/store.ts';
+import { reportArgs, steamLaunch, steamNative } from '../install/sources.ts';
+import { cloudSaves } from '../game/keyStore.ts';
 import { GamepadInput } from './gamepad.ts';
 import type { CapacitorLike } from './platform.ts';
 import { mapKey, showMap } from './mapView.ts';
@@ -318,10 +320,12 @@ export function installPageHooks(g: Game, screen: Screen, canvas: HTMLCanvasElem
     shown: recall(PAD_KEY) === '1',
     fullScreen: fullScreen(),
   });
+  const copy = (text: string): Promise<void> => navigator.clipboard.writeText(text);
+  const steam = steamNative();
   g.hooks = {
     applyOptions: apply,
     transfer: {
-      copy: (text) => navigator.clipboard.writeText(text),
+      copy,
       paste: () => navigator.clipboard.readText(),
       async pasteBox() {
         const r = await dialog('The clipboard cannot be read here. Paste the saved game below.', true, ['Cancel', 'Import']);
@@ -346,5 +350,43 @@ export function installPageHooks(g: Game, screen: Screen, canvas: HTMLCanvasElem
       screen.flushKeys();
       return text;
     },
+    // The desktop app alone has a Steam to set up: web and Android show no Steam (beta) menu.
+    ...(steam
+      ? {
+          steam: {
+            status: () => steam.status(),
+            launched: () => steamLaunch().steam,
+            options() {
+              const { playLine, compatTool, macPlay, cloud, account, cloudDefault } = steam.options();
+              return {
+                playLine,
+                compatTool,
+                macPlay,
+                cloud: account !== null && cloud[account] === true,
+                cloudAny: Object.values(cloud).some((on) => on),
+                cloudOffered: steamLaunch().steam && account !== null && !(account in cloud) && cloudDefault === true,
+              };
+            },
+            setOption: (name, on) => steam.setOption(name, on),
+            lineState: () => steam.lineState(),
+            fixCloud: () => steam.fixCloud(),
+            async copyLine() {
+              const line = await steam.launchLine();
+              if (line === null) return false;
+              await copy(line);
+              return true;
+            },
+            async copyReport() {
+              const report = await steam.report(reportArgs());
+              if (report === null) return false;
+              await copy(report);
+              return true;
+            },
+            // The system's browser, as the installer opens GOG's page (desktop/main.cjs setWindowOpenHandler).
+            open: (url) => void window.open(url, '_blank'),
+            cloud: cloudSaves(steam),
+          },
+        }
+      : {}),
   };
 }

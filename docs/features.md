@@ -37,7 +37,7 @@ describes how the Modern look is drawn.
   out of Desktop, Documents and Downloads, so the system asks nothing. The
   web game reads the site's `gamedata/index.json`, a list of the files'
   names in `gamedata/` beside the page, and fetches each: a copy put
-  there by whoever hosts it ([Hosting it yourself](install.md#hosting-it-yourself)),
+  there by whoever hosts it ([Hosting it yourself](advanced.md#hosting-it-yourself)),
   or, on the dev server, which makes the index itself, the developer's
   own. A copy whose every file is one of the known
   releases' is installed at once and the game starts; a modified or
@@ -357,7 +357,10 @@ describes how the Modern look is drawn.
   pad's pause button, or Escape at the command prompt) opens the Pause
   menu wherever the game waits, and the game carries on where it was. A
   press on a gamepad or the touch pad puts the game in controller mode,
-  and a held button does not repeat into a second turn.
+  and a held button does not repeat into a second turn. Every connected
+  controller is read at once - a Steam Deck's own controls and an
+  external pad, or a pad on a TV box beside its remote - so it does not
+  matter which one the system lists first.
 - **The command menu** lists what the surroundings call for first, names
   the weapon in hand ("Attack (Bow)", or "Attack (no arrows)" for a bow
   with nothing to shoot) and leads with it when it reaches,
@@ -750,8 +753,10 @@ set Input to Classic and type it.
 | **The mimic's armour** | 3 | 3 | 8 |
 | **A chest, or loot lying, in a fight** | Walked over, as a body is - by either side; walked into to be opened or taken once no foe stands | Walked over, as Story | In the way, until it is dealt with |
 | **Auto combat and one of the party charmed against it** | Lets them be | Lets them be | Strikes them |
+| **Fear and An Corp Xen on the party's own creatures** (summoned, or charmed to its side) | Passed over | Passed over | Put to flight with the foes, as in 1988 |
 | **Sleepers when an ambushed camp's fight is left** | Wake | Wake | Sleep on (out in Britannia, till a towne, a spell or the next camp) |
 | **The old man at an outdoor camp that rested** | Whenever a level is due; else 1 in 4, not within two weeks of his last | As Story | 1 in 4, every camp |
+| **A potion** | What its colour says | What its colour says | 1 in 16 the sleep potion, whatever its colour, and 1 in 16 any of the eight, as in 1988 - said in the log ("The potion was not what it seemed!") |
 
 The same under all three: armour worn counts (the DOS game's armour did
 nothing); a creature's blow is rolled, never its whole attack every time;
@@ -804,7 +809,11 @@ other hurt in the game kills as it always did.
   for X the snap target, else the nearest foe it reaches. The snap target
   is the foe the first hand that reaches one would strike: the one the
   member last struck or chose while it is still in reach, else the
-  nearest, the weaker of two as near. With **Snap targets** on (Settings;
+  nearest, the weaker of two as near. A foe hidden in a room's dark (walled
+  off until a trigger opens it) is never chosen for the player, but one
+  aimed at there by hand - with Attack, or a spell at one foe (Flam Por,
+  Corp Por, a field, An Ex Xen, Bet Rel Xen) - stays the snap target, and
+  where the next aim starts, until LB/RB step off it. With **Snap targets** on (Settings;
   on to begin with) it is marked on the member's turn - the crosshair's
   four arrows, small, round the foe - only when an X would strike it. LB
   and RB (or [ and ]) step it to the next foe in reach or the one before,
@@ -816,8 +825,15 @@ other hurt in the game kills as it always did.
   1988), so X passes over a foe with one of the party's side beside it
   (a dagger, spear or axe at a neighbour, struck from the hand, strays
   nowhere, and reaches a foe over a wall or tree as aiming by hand does);
-  where every foe in reach has, it says "Iolo might hit ally, confirm?" and
-  X again, straight away, shoots. Off, every blow is aimed by hand.
+  where every foe in reach has, X shoots at one press, the friends a miss
+  might strike marked beforehand with a red badge (Snap targets on). Off,
+  every blow is aimed by hand.
+  A creature summoned or charmed to the party's side snaps as a member
+  does, its snap target marked and stepped through the same way: a
+  neighbour for its bite or claws, and for what it throws, spits or
+  breathes (a daemon's fire, a python's spit) a foe within its own reach
+  along a clear line, a foe with a friend beside it passed over as for a
+  shot. Aimed by hand, its crosshair goes as far as that reach and no further.
 - **Auto combat** (Pause menu): Off, Allies or All, a press turning it on
   through them. *All* plays the party, and the creatures summoned or
   charmed to its side, until a key is pressed. *Allies* plays all of them
@@ -1026,6 +1042,15 @@ settled on the original Apple II disks - is told in
   and Modern rules the heavy hitters - a gargoyle, a daemon or a dragon -
   roll half their attack to all of it (a dragon 15 to 30), so that a party
   just begun cannot outlast one; the Classic keep the Apple II's 1 to it.
+- **A creature on the party's side strikes with its own skill.** A daemon
+  summoned or a foe charmed, the player's to command, attacks with no
+  weapon, and for a creature with none the DOS game read no stat at all -
+  its chance to hit whatever lay in a register. The port gives it its own
+  strength or dexterity, as on a turn of its own against the party.
+- **A creature's escape is a flight.** Once every member had left the
+  field, a creature of the party's escaping swept the foes off it too, and
+  the fight ended as a victory - a dungeon's room cleared by it. Now it
+  goes alone, and the fight ends as the members' flight did.
 - **Random numbers are random.** The 1988 game drew them from a 16 bit
   number stepped the same way each time, which ran in loops - a game
   seeded into one of them saw its rolls come round every 40 or 82 - and
@@ -1117,6 +1142,14 @@ each with the settings then in use. One character played in two windows
 at once - each saving over the other's game - is warned of in both at
 the next command prompt, once for each other window; windows playing
 different characters are nothing to each other.
+
+**Steam's Ultima V.** The desktop app can be what Steam's Play starts for
+a copy of Ultima V bought there (the title's Steam (beta) menu, every option off until turned on; see
+[Steam's Ultima V](steam.md#play-from-steam)). With Cloud saves on, its
+saves are kept with Steam, in the game's folder per account and synced by
+Steam Cloud, apart from any other launch's; Export and Import carry a game
+across. The window title, the title screen and Settings' last line say
+Ultima V SP and the version.
 
 Saving is checked: each save is read back before the game says "(saved)"
 or "Done.", and where it cannot be kept (the storage full or shut, as in

@@ -3,6 +3,8 @@ export function updateKind(where: {
   platform: string;
   env: Record<string, string | undefined>;
   argv: string[];
+  selfUpdate?: boolean;
+  inApplications?: boolean;
 }): 'auto' | 'notice' | 'flatpak' | 'none';
 export function isNewer(latest: string, current: string): boolean;
 export function shouldNotice(latest: string, current: string, told: string | null): boolean;
@@ -14,6 +16,7 @@ export interface UpdateOffer {
   told: boolean;
   installed?: boolean;
   quits?: boolean;
+  onQuit?: boolean;
   page?: boolean;
   why?: 'approve' | 'denied';
 }
@@ -22,8 +25,15 @@ export interface FlatpakPortal {
   connect: typeof import('./flatpakUpdates.cjs').connect;
   watch: typeof import('./flatpakUpdates.cjs').watch;
 }
-export function checkForUpdates(o: { electron: unknown; quiet: boolean; file: string; flatpak?: FlatpakPortal }): Promise<void>;
-export function applyUpdate(o: { electron: unknown }): boolean;
+export function checkForUpdates(o: {
+  electron: unknown;
+  quiet: boolean;
+  file: string;
+  flatpak?: FlatpakPortal;
+  steam?: boolean;
+  selfUpdate?: boolean;
+}): Promise<void>;
+export function applyUpdate(o: { electron: unknown; steam?: boolean }): boolean;
 export function toldOfUpdate(o: { file: string }): void;
 export function currentOffer(): UpdateOffer | null;
 export function onOffer(listener: (offer: UpdateOffer | null) => void): void;

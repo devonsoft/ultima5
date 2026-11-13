@@ -15,9 +15,11 @@
 # the release's version ("### v1.0.37", or "### v1.0.37, <date>"), through
 # desktop/release-notes.cjs, and puts it above them; the README has no
 # such section, so a release says so in a warning and goes out with the
-# generated notes alone. Desktop builds are unsigned: see "Desktop app,
-# and the Steam Deck" in docs/install.md for what that means on each
-# platform. The APK is signed with the committed sideload key unless the
+# generated notes alone. The Windows builds are unsigned: see "The desktop
+# app" in docs/advanced.md for what that means on each platform. A run started by hand with "prerelease" on publishes the release
+# as a GitHub pre-release, for testers: the updater and the update notice
+# look only at the latest full release, so nothing updates to it, and the
+# site is not deployed. The APK is signed with the committed sideload key unless the
 # ANDROID_KEYSTORE_* secrets provide a release key. Linux gets a Flatpak
 # bundle as well as an AppImage; the Linux job installs (and caches) the
 # runtimes it needs.
@@ -30,6 +32,10 @@ on:
         description: Publish a GitHub Release (off keeps the builds as artifacts only)
         type: boolean
         default: true
+      prerelease:
+        description: Publish as a pre-release, for testers - nothing updates to it, the site is not deployed
+        type: boolean
+        default: false
       android_only:
         description: Build only the Android app (no desktop builds, so no release)
         type: boolean
@@ -100,8 +106,27 @@ jobs:
       - run: npm run dist -- ${{ matrix.args }}
         working-directory: desktop
         env:
-          # Unsigned macOS builds: skip the notarisation step electron-builder would otherwise attempt.
+          # No identity looked for in the runner's keychain: the Mac build names its own (desktop/macSigning.cjs).
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          # The Mac build signed with the Developer ID certificate, from the repository's secrets; without them (a
+          # fork's build) it is signed ad hoc, as before. Given to the Mac build alone: electron-builder would take a
+          # CSC_LINK for Windows signing too.
+          CSC_LINK: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_BASE64 || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
+          MACOS_SIGNING_IDENTITY: ${{ matrix.target == 'mac' && secrets.MACOS_SIGNING_IDENTITY || '' }}
+          # Notarized only for a release, which is what players download: a few minutes more a build.
+          APPLE_ID: ${{ matrix.target == 'mac' && github.ref == 'refs/heads/release' && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.target == 'mac' && github.ref == 'refs/heads/release' && secrets.APPLE_APP_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ matrix.target == 'mac' && github.ref == 'refs/heads/release' && secrets.APPLE_TEAM_ID || '' }}
+      # A release's Mac app must be notarized: electron-builder only warns when it cannot notarize (an Apple secret
+      # missing), and Gatekeeper would then refuse the download. Builds without the certificate (a fork's) are not checked.
+      - if: matrix.target == 'mac' && github.ref == 'refs/heads/release'
+        run: |
+          if [ "$SIGNED" != true ]; then echo 'Not signed: no certificate.'; exit 0; fi
+          for app in dist/mac*/*.app; do spctl --assess --type execute -vv "$app"; done
+        working-directory: desktop
+        env:
+          SIGNED: ${{ secrets.MACOS_CERTIFICATE_BASE64 != '' }}
       # The built app, launched: it must start with its fuses set (its ASAR checked, and loaded from nothing else).
       - if: matrix.target == 'linux'
         run: xvfb-run -a node smoke-built.cjs
@@ -119,6 +144,7 @@ jobs:
             desktop/dist/*.flatpak
             desktop/dist/*.exe
             desktop/dist/*.dmg
+            desktop/dist/*.zip
             desktop/dist/latest*.yml
             desktop/dist/*.blockmap
           if-no-files-found: error
@@ -187,12 +213,15 @@ jobs:
           node desktop/release-notes.cjs "$VERSION" > notes.md
           notes=()
           if [ -s notes.md ]; then notes=(--notes-file notes.md); else echo "::warning::README.md has no changelog section for v$VERSION"; fi
+          if [ "$PRERELEASE" = true ]; then notes+=(--prerelease); fi
           gh release create "v$VERSION" files/* --title "v$VERSION" --generate-notes "${notes[@]}" --target "$GITHUB_SHA"
         env:
+          PRERELEASE: ${{ inputs.prerelease }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.v.outputs.version }}
       # The site follows the releases: deployed now from the commit just released, which also brings its Flatpak
-      # repository up to the newest release.
-      - run: gh workflow run pages.yml --ref main -f source="$GITHUB_SHA"
+      # repository up to the newest release. Not for a pre-release.
+      - if: ${{ !inputs.prerelease }}
+        run: gh workflow run pages.yml --ref main -f source="$GITHUB_SHA"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

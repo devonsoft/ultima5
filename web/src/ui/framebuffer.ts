@@ -147,6 +147,12 @@ export interface TileArt {
    * floor round it); `place`, where on the world map the square is, for art that draws its shore from the map.
    */
   draw(page: Uint32Array, tile: number, x: number, y: number, ground?: number, place?: Place, tint?: number, floor?: number): void;
+  /**
+   * Whether every tile is drawn as a whole square, a figure's ground and all (the PC EGA and Apple ][ tiles, black
+   * round their figures), and never over the `ground` it is given: Smooth motion then glides a figure's square whole
+   * (viewGlide.ts). Absent: figures are drawn over their ground.
+   */
+  readonly wholeSquares?: boolean;
   /** The party on foot as its members (a grid of four), where the art draws them so; see StandardArt.party. */
   party?(page: Uint32Array, figures: Figure[], x: number, y: number, terrain: number, floor?: number, place?: Place): void;
   /** The colour of one pixel of a tile at EGA resolution, as a block of HI by HI (for the reveal). */
@@ -510,7 +516,27 @@ export class Framebuffer {
     for (let r = 0; r < HI; r++) page.fill(rgba, o + r * HI_WIDTH, o + r * HI_WIDTH + HI);
   }
 
+  /**
+   * Boxes over the view (EGA pixels, inclusive) that what is drawn keeps out of while they are set (`mask`): a fight's
+   * marks under a menu or the townsman's words (combat.ts drawCombatMarks). None, mostly.
+   */
+  private masks: readonly (readonly [number, number, number, number])[] = [];
+
+  /** Keep what is drawn from now on out of `boxes` (EGA pixels, inclusive), until masked again or null. */
+  mask(boxes: readonly (readonly [number, number, number, number])[] | null): void {
+    this.masks = boxes ?? [];
+  }
+
+  /** Whether colour-page pixel (px, py) lies in a masked box. */
+  private masked(px: number, py: number): boolean {
+    if (this.masks.length === 0) return false;
+    const x = Math.floor(px / HI);
+    const y = Math.floor(py / HI);
+    return this.masks.some(([a, b, c, d]) => x >= a && x <= c && y >= b && y <= d);
+  }
+
   private put(x: number, y: number, c: number): void {
+    if (this.masks.length > 0 && this.masked(x * HI, y * HI)) return;
     if (x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT) {
       this.px[y * WIDTH + x] = c & 15;
       this.block(this.hx, x, y, EGA_RGBA[c & 15]);
@@ -625,7 +651,7 @@ export class Framebuffer {
         const out = Math.hypot(dx, dy) - r;
         const edge = Math.min(px + 0.5 - left, left + size - px - 0.5, py + 0.5 - top, top + size - py - 0.5);
         const depth = dx > 0 && dy > 0 ? -out : edge;
-        if (out <= 0 && depth <= stroke) h[py * HI_WIDTH + px] = rgba;
+        if (out <= 0 && depth <= stroke && !this.masked(px, py)) h[py * HI_WIDTH + px] = rgba;
       }
     }
     this.dirty = true;
@@ -675,7 +701,7 @@ export class Framebuffer {
         for (let dx = 0; dx < g; dx++) {
           const px = px0 + dx;
           const py = py0 + dy;
-          if (px < lo || px >= hi || py < lo || py >= hi) continue;
+          if (px < lo || px >= hi || py < lo || py >= hi || this.masked(px, py)) continue;
           const i = py * HI_WIDTH + px;
           h[i] = half ? halfDark(h[i]) : colour;
         }
@@ -732,7 +758,7 @@ export class Framebuffer {
         const dy = Math.max(Math.abs(py + 0.5 - cy) - (hh - r), 0);
         const out = Math.hypot(dx, dy) - r;
         const i = py * HI_WIDTH + px;
-        if (out > g) continue;
+        if (out > g || this.masked(px, py)) continue;
         if (out > 0) h[i] = halfDark(h[i]);
         else if (!punched(px + 0.5, py + 0.5)) h[i] = red;
       }
@@ -2657,6 +2683,10 @@ function epx(src: Uint8Array, w: number, h: number, clamp = false): Uint8Array {
 export class TilesAlone implements TileArt {
   constructor(private readonly art: TileArt) {}
 
+  get wholeSquares(): boolean {
+    return this.art.wholeSquares === true;
+  }
+
   draw(page: Uint32Array, tile: number, x: number, y: number, ground?: number, place?: Place, tint?: number, floor?: number): void {
     this.art.draw(page, tile, x, y, ground, place, tint, floor);
   }
@@ -2673,6 +2703,8 @@ export class TilesAlone implements TileArt {
 
 /** The Original tile art: the EGA tiles (as the animator has left them) enlarged. */
 export class EgaArt implements TileArt {
+  readonly wholeSquares = true;
+
   constructor(private readonly tiles: Uint8Array) {}
 
   draw(page: Uint32Array, tile: number, x: number, y: number): void {

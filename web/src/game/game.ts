@@ -116,8 +116,109 @@ export interface GameHooks {
    * opened - taking it up, and the player told of it (its box at the title, once a version).
    */
   update?: UpdateHook;
+  /** A note for the title to say once, in the news box (a Steam launch's, boot.ts steamNote): its text, and the player told. */
+  note?: () => { text: string; seen: () => void } | null;
   /** Leave the game, where it runs as an app that can (ui/platform.ts appQuit); a browser tab has none. */
   quit?: (() => void) | undefined;
+  /** The title's Steam (beta) menu (the desktop app's; web and Android have none): see SteamHook. */
+  steam?: SteamHook;
+  /** This app's own version (the desktop app's, the Android app's), for the edition's name; none on the web. */
+  version?: () => string | undefined;
+}
+
+/** What the Steam (beta) menu opens with (desktop/main.cjs steamStatus). Only found by reading. */
+export interface SteamStatus {
+  system: 'linux' | 'windows' | 'mac';
+  /** The Flatpak build, which works less well with Steam than the AppImage. */
+  flatpak: boolean;
+  /** Steam's folder, the player's home written ~; null where no Steam was found. */
+  steam: string | null;
+  /** Ultima V in Steam's libraries: installed in `where`, listed in `where` with its folder gone, or none. */
+  game: 'ok' | 'missing' | 'none';
+  where: string;
+  /** Whether a Steam account is known: this launch's, else the one signed in last. */
+  account: boolean;
+  /** Whether Steam launched this run. */
+  launch: boolean;
+  /** The launch line this copy would use; null where it has none (the portable .exe, a Mac). */
+  line: string | null;
+  /** Whether Steam is running, which setting up or taking away would quit: a Mac's, and Linux's where canFixCloud. */
+  steamRunning?: boolean;
+  /**
+   * Linux's: whether Steam's cloud rules for the game lack MacOS ('needed': saves uploaded from here never reach a
+   * Mac), have it, or were not found; and whether they may be set from here (not from the Flatpak, a Steam launch or
+   * Game Mode).
+   */
+  cloudRule?: 'needed' | 'ready' | null;
+  canFixCloud?: boolean;
+}
+
+/** The options that set Steam's Play up, by system: a launch line (Windows, Linux), the compatibility tool, a Mac's. */
+export type PlayOption = 'playLine' | 'compatTool' | 'macPlay';
+
+/** The options as they stand on this machine, Cloud saves for this launch's Steam account (off with none known). */
+export interface SteamChoices {
+  playLine: boolean;
+  compatTool: boolean;
+  macPlay: boolean;
+  cloud: boolean;
+  /** Whether Cloud saves is on for any Steam account on this machine, this launch's or another's. */
+  cloudAny: boolean;
+  /**
+   * Whether Cloud saves is to come on by itself for this launch's account (cloudSwitch.ts cloudByDefault): not yet
+   * chosen for it, on a machine set up since it became the default.
+   */
+  cloudOffered: boolean;
+}
+
+/** An option switched (desktop/steamOptions.cjs switchOption): whether it is on now, what to say, a launch line to show. */
+export interface SteamSwitched {
+  on: boolean;
+  message: string;
+  line?: string;
+}
+
+/** Whether Steam's saved launch line is this copy's (desktop/launchCheck.cjs), and whether both Linux options are on. */
+export interface LineCheck {
+  state: 'correct' | 'missing' | 'not-seen' | 'stale' | 'twice';
+  bothLinux: boolean;
+}
+
+/**
+ * The two sides of Steam Cloud saves' copy (cloudSwitch.ts): this computer's own saves and Steam's folder, each as
+ * keys and values; a write on one side (true, or why not), a removal (false where it could not be made); the switch
+ * recorded once the copy has all gone through, or its failure with the option left as it was; and the running game's
+ * saves kept from then on where the option now says.
+ */
+export interface CloudSaves {
+  own(): Record<string, string>;
+  /** Steam's folder, or null where it can't be read. */
+  steam(): Record<string, string> | null;
+  write(side: 'own' | 'steam', key: string, value: string): true | string;
+  remove(side: 'own' | 'steam', key: string): boolean;
+  record(on: boolean, failed?: string): Promise<SteamSwitched | null>;
+  use(on: boolean): void;
+}
+
+/** What the Steam (beta) menu asks of the desktop app (steamMenu.ts). */
+export interface SteamHook {
+  status(): Promise<SteamStatus>;
+  /** Whether Steam started this copy (boot.ts steamLaunch): asked at once, as the title's lines depend on it. */
+  launched(): boolean;
+  options(): SteamChoices;
+  /** Turns an option on or off, with what it does here; null where it was refused. */
+  setOption(name: PlayOption, on: boolean): Promise<SteamSwitched | null>;
+  /** Steam's saved launch line read back, or null where there is none to read. */
+  lineState(): Promise<LineCheck | null>;
+  /** Linux: Steam's cloud rules given MacOS, closing Steam (desktop/steamSetup.cjs linuxCloudSetup); what to say. */
+  fixCloud(): Promise<string | null>;
+  /** Puts the launch line on the clipboard; false where this copy has none. */
+  copyLine(): Promise<boolean>;
+  /** Puts the tester report on the clipboard; false where it could not be made. */
+  copyReport(): Promise<boolean>;
+  /** Opens a page in the player's browser. */
+  open(url: string): void;
+  cloud: CloudSaves;
 }
 
 /** What bump to act remembers of a thing (Game.bumped). */
@@ -238,6 +339,11 @@ export class Game {
    * with LB/RB, theirs again while it stands in reach; -1 none. Not saved: a fight's own.
    */
   snapMemory: number[] = new Array<number>(0x20).fill(-1);
+  /**
+   * Whether each member's snap target (snapMemory) was chosen with the crosshair - aimed at by hand with Attack, or
+   * with a spell aimed at one foe - and so stays theirs though it stands in the dark (combat.ts standingFoe). Not saved.
+   */
+  snapByHand: boolean[] = new Array<boolean>(0x20).fill(false);
   /** The day (time.ts gameDay) the old man last came to camp (combat.ts apparitionComes); -1, not yet. Saved. */
   oldManDay = -1;
   /** The arrows and quarrels held above the save's 99, by item (ammo.ts: the Modern rules carry 999). Saved. */

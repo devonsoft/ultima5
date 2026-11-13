@@ -87,6 +87,9 @@ export function enemy(
 export const enemyFlags = (g: Game, kind: number): number => g.data.words(0x153c + kind * 2, 1)[0];
 const creatureName = (g: Game, kind: number): string => g.data.table(0x1856, 0x30)[kind] ?? '';
 
+/** How far creature kind `kind` strikes, 1 a neighbour: its blow, or what it throws, spits or breathes (attackWith). */
+export const creatureReach = (g: Game, kind: number): number => Math.max(1, g.data.bytes(0x159c, 0x30)[kind] ?? 1);
+
 // --- Who's who -----------------------------------------------------------------------------
 
 /** ULTIMA_5646: is combatant `i` on the monsters' side now (a charmed player is, a charmed monster is not). */
@@ -872,7 +875,9 @@ export function stat(g: Game, i: number, which: number): number {
   const c = g.combat[i];
   const s = g.s;
   if (c.flags & CF.Monster) {
-    if (which === 0) which = enemyFlags(g, c.who) & EF.Str ? Q.Str : Q.Dex;
+    // 0xff, no weapon - a creature's own blow on the party's side (attackEach), where the DOS game read no stat at all
+    // and took what was left in a register - as 0, its own: its strength or dexterity, as on a foe turn.
+    if (which === 0 || which === 0xff) which = enemyFlags(g, c.who) & EF.Str ? Q.Str : Q.Dex;
   } else if (which > 0) {
     which = which === 0xff ? Q.Dex : g.data.bytes(0x169c, 0x38)[which] === 8 ? Q.Str : Q.Dex;
   }
@@ -1450,11 +1455,13 @@ export async function aim(g: Game, i: number, range: number, friend = false): Pr
   const s = g.s;
   s.crosshair = 1;
   let target = s.actors[g.combat[i].actor].b7;
+  // A foe chosen with the crosshair - by Attack, or a spell aimed at one - is where the next aim starts, in the dark too.
+  if (!friend && g.snapByHand[i] && g.snapMemory[i] >= 0) target = g.snapMemory[i];
   const tc = g.combat[target];
   if (friend) target = nearestFriend(g, i, range);
   else if (
     target > 0x1f ||
-    !standingFoe(g, target) || // the last one struck, charmed to the party's side since
+    !standingFoe(g, target, i) || // the last one struck, charmed to the party's side since
     (tc.flags & (CF.Dead | CF.Invisible)) !== 0 ||
     tc.flags === 0 ||
     s.actors[tc.actor].tile === 0 ||
@@ -1591,11 +1598,13 @@ function missed(g: Game, i: number): void {
 export const BOLT_BEAT_MS = 350;
 
 /** COMSUBS_0a68: a ranged attack: aim, fly, hit (boomerangs come back). */
-async function rangedAttack(g: Game, i: number, weapon: number, missile: number): Promise<void> {
+async function rangedAttack(g: Game, i: number, weapon: number, missile: number, range: number): Promise<void> {
   const s = g.s;
   const needsSpace = weapon === 0x1a || weapon === 0x1c || weapon === 0x24 || weapon === 0x13 || weapon === 0x11;
   if (needsSpace && interferes(g, i, 'ranged attack')) return;
-  const d = await aim(g, i, g.data.bytes(0x1664, 0x38)[weapon]);
+  // Aimed within the reach attackWith found: the weapon's, or a creature's own - read from the weapons' table by a
+  // creature's 0xff it was none, and the crosshair stood fixed on the nearest foe, however far.
+  const d = await aim(g, i, range);
   if (d === 0) return;
   // A dagger, a spear or a throwing axe at a neighbour strikes from the hand (the port's): 1988 threw it at arm's
   // length too - kept, not spent, but flown, and a miss flew on to strike whoever stood beside the foe (missileAt).
@@ -1638,7 +1647,8 @@ async function rangedAttack(g: Game, i: number, weapon: number, missile: number)
     await strike(g, victim, i);
     await report(g, victim, i);
   } else if (target > -1) {
-    g.printChar('\n');
+    // On a line of its own, as a hit's is - not under an empty one, the aim having ended its line.
+    if (g.text.win.x !== 0) g.printChar('\n');
     missed(g, target);
     await missFlash(g, i);
   }
@@ -1684,7 +1694,7 @@ export async function attackWith(g: Game, i: number, weapon: number): Promise<vo
   let range: number;
   let missile: number;
   if ((c.flags & CF.Player) === 0) {
-    range = g.data.bytes(0x159c, 0x30)[c.who];
+    range = creatureReach(g, c.who);
     if (range === 1) range = 0;
     missile = g.data.bytes(0x15cc, 0x30)[c.who];
   } else {
@@ -1708,7 +1718,7 @@ export async function attackWith(g: Game, i: number, weapon: number): Promise<vo
       await melee(g, i, target, weapon);
     }
   } else {
-    await rangedAttack(g, i, weapon, missile);
+    await rangedAttack(g, i, weapon, missile, range);
   }
 }
 
@@ -1722,11 +1732,26 @@ const HELD = [0x10, 0x15, 0x16];
 /** The morning star and the halberd: a blow two squares off, flying nowhere (missileAt). */
 const REACH = [0x19, 0x22];
 
-const standingFoe = (g: Game, j: number): boolean => {
+/**
+ * Whether the field hides whoever stands at (x, y), as the view draws it (world.ts overlayActors): a room's dark (0xff),
+ * a part walled off until a trigger lays floor over it, or 0x87.
+ */
+const hiddenAt = (g: Game, x: number, y: number): boolean => {
+  const t = g.combatMap[y * 32 + x];
+  return t === 0xff || t === T.T87;
+};
+
+/**
+ * Whether combatant `j` is a foe to strike or aim at: on the field, alive, not invisible, on the foes' side, and in
+ * sight - never one the field hides, which the player cannot see (a snap target, the aim's first square, LB/RB) -
+ * unless it is the one `by` chose with the crosshair (Game.snapByHand), which stays theirs in the dark.
+ */
+const standingFoe = (g: Game, j: number, by = -1): boolean => {
   if (j < 0 || j >= 0x20) return false;
   const c = g.combat[j];
   return (
     inArena(c.x, c.y) &&
+    (!hiddenAt(g, c.x, c.y) || (by >= 0 && g.snapByHand[by] && g.snapMemory[by] === j)) &&
     combatantAt(g, c.x, c.y) === j &&
     (c.flags & (CF.Invisible | CF.Player)) === 0 &&
     onMonsterSide(g, j) &&
@@ -1749,10 +1774,10 @@ export function followUpFoe(g: Game, i: number, weapon: number, walkedInto: Bump
   const reaches = (j: number, pointed = false): boolean => reachesFoe(g, i, weapon, j, pointed);
   const risky = careful && strays(g, weapon);
   const there = walkedInto ? combatantAt(g, walkedInto.x, walkedInto.y) : -1;
-  if (walkedInto && standingFoe(g, there) && reaches(there, walkedInto.pointed === true)) return walkedInto;
+  if (walkedInto && standingFoe(g, there, i) && reaches(there, walkedInto.pointed === true)) return walkedInto;
   let best = -1;
   for (let j = 0; j < 0x20; j++) {
-    if (j === i || !standingFoe(g, j) || !reaches(j) || (risky && strayRisk(g, i, j))) continue;
+    if (j === i || !standingFoe(g, j, i) || !reaches(j) || (risky && strayRisk(g, i, j))) continue;
     if (
       best < 0 ||
       between(g, i, j) < between(g, i, best) ||
@@ -1814,7 +1839,7 @@ function reachesFoe(g: Game, i: number, weapon: number, j: number, pointed: bool
 
 /** Whether any foe still standing is within reach of combatant `i`'s `weapon`, aimed by the player. */
 function foeInReach(g: Game, i: number, weapon: number): boolean {
-  for (let j = 0; j < 0x20; j++) if (j !== i && standingFoe(g, j) && reachesFoe(g, i, weapon, j, true)) return true;
+  for (let j = 0; j < 0x20; j++) if (j !== i && standingFoe(g, j, i) && reachesFoe(g, i, weapon, j, true)) return true;
   return false;
 }
 
@@ -1850,7 +1875,7 @@ export function foePast(g: Game, i: number, dx: number, dy: number): Bumped | nu
     const y = c.y + dy * k;
     if (!inArena(x, y)) return null;
     const j = combatantAt(g, x, y);
-    if (standingFoe(g, j)) {
+    if (standingFoe(g, j, i)) {
       const past = { x, y, pointed: true };
       return hands.some((w) => followUpFoe(g, i, w, past) === past) ? past : null;
     }
@@ -1899,20 +1924,26 @@ function nothingInReach(g: Game): void {
 async function attackEach(g: Game, i: number, weapons: number): Promise<void> {
   const s = g.s;
   if ((g.combat[i].flags & CF.Player) === 0 || weapons === 0) {
-    // X's bare hands (a member with no weapon), Snap attacks on: at the snap target beside them (snapTarget) - the
-    // weakest of those as near, as a weapon's blow goes, or the one last struck or chosen - or "Out of reach!". (A
-    // creature on the party's side aims its own, as ever.)
-    if (g.autoAim && !g.bumpFoe && g.combat[i].flags & CF.Player) {
+    // X's bare hands (a member with no weapon) or a creature's own attack, Snap attacks on: at the snap target within
+    // its reach (snapTarget) - the weakest of those as near, as a weapon's blow goes, or the one last struck or
+    // chosen - or "Out of reach!".
+    if (g.autoAim && !g.bumpFoe) {
       const best = snapTarget(g, i);
       if (best < 0) return nothingInReach(g);
       g.bumpFoe = { x: g.combat[best].x, y: g.combat[best].y };
     }
+    // Snap attacks off, a foe walked into is only where the crosshair starts, as for a member's weapons below.
+    if (!g.options.autoAim && g.bumpFoe) {
+      g.aimFrom = g.bumpFoe;
+      g.bumpFoe = null;
+    }
     const at = g.bumpFoe ? combatantAt(g, g.bumpFoe.x, g.bumpFoe.y) : -1;
     s.weapon = 0xff;
-    // Bare hands, named as a weapon is.
+    // A member's bare hands, named as a weapon is; a creature's own attack - its claws, or a daemon's fire thrown far
+    // (attackWith, by its kind) - only as an attack.
     const hands = g.t(0x6db2); // "bare hands"
     if (g.text.win.x > 1) g.printChar('\n');
-    g.print(`${hands.charAt(0).toUpperCase()}${hands.slice(1)}:`);
+    g.print(g.combat[i].flags & CF.Player ? `${hands.charAt(0).toUpperCase()}${hands.slice(1)}:` : 'Attack:');
     await attackWith(g, i, 0xff);
     if (!g.cancelled) rememberFoe(g, i, at);
     return;
@@ -1962,7 +1993,7 @@ async function attackEach(g: Game, i: number, weapons: number): Promise<void> {
       const foe = followUpFoe(g, i, weapon, walkedInto ?? snap, true);
       if (!foe) continue;
       g.bumpFoe = foe;
-    } else if (on && aimedAt >= 0 && strikes(g, weapon) && standingFoe(g, aimedAt) && reachesFoe(g, i, weapon, aimedAt, true)) {
+    } else if (on && aimedAt >= 0 && strikes(g, weapon) && standingFoe(g, aimedAt, i) && reachesFoe(g, i, weapon, aimedAt, true)) {
       g.bumpFoe = { x: g.combat[aimedAt].x, y: g.combat[aimedAt].y, pointed: true };
     }
     const byHand = g.bumpFoe === null;
@@ -1970,7 +2001,7 @@ async function attackEach(g: Game, i: number, weapons: number): Promise<void> {
     const at = g.bumpFoe ? combatantAt(g, g.bumpFoe.x, g.bumpFoe.y) : -1;
     const attacked = await attackHand(g, weapon, weapons);
     // The first blow's foe is the member's to strike again (snapTarget) - walked into, snapped at or aimed at by hand.
-    if (attacked && !struck && !g.cancelled) rememberFoe(g, i, at);
+    if (attacked && !struck && !g.cancelled) rememberFoe(g, i, at, byHand);
     if (g.cancelled) {
       if (struck) g.cancelled = false;
       return;
@@ -1989,15 +2020,26 @@ function nearestFirst(g: Game, i: number, js: number[]): number[] {
 }
 
 /**
- * The foes member combatant `i`'s snap attack (X, Snap attacks on) could open on, as attackEach would: those the first
- * hand to reach one reaches - a shot only along a clear line - or with no weapon, those beside them; the nearest
- * first. None, for a creature, or a member whose bow has nothing to shoot (unloaded).
+ * The foes combatant `i`'s snap attack (X, Snap attacks on) could open on, as attackEach would: a member's, those the
+ * first hand to reach one reaches - a shot only along a clear line - or with no weapon, those beside them; a creature
+ * on the party's side's, those within its own reach (creatureReach); the nearest first. None for one on the foes'
+ * side, or a member whose bow has nothing to shoot (unloaded).
  */
 export function snapTargets(g: Game, i: number): number[] {
   const c = g.combat[i];
-  if (!c || (c.flags & CF.Player) === 0 || onMonsterSide(g, i) || unloaded(g, c.who)) return [];
+  if (!c || c.flags === 0 || c.flags & CF.Dead || onMonsterSide(g, i)) return [];
   const foes: number[] = [];
-  for (let j = 0; j < 0x20; j++) if (j !== i && standingFoe(g, j)) foes.push(j);
+  for (let j = 0; j < 0x20; j++) if (j !== i && standingFoe(g, j, i)) foes.push(j);
+  if (!(c.flags & CF.Player)) {
+    // A creature on the party's side: a neighbour for its blow; for what it throws, spits or breathes, within its
+    // reach along a clear line (attackWith, rangedAttack).
+    const reach = creatureReach(g, c.who);
+    const missile = g.data.bytes(0x15cc, 0x30)[c.who];
+    const reaches = (j: number): boolean =>
+      reach <= 1 ? between(g, i, j) <= 1 : between(g, i, j) <= reach && clearShot(g, c.x, c.y, g.combat[j].x, g.combat[j].y, missile);
+    return nearestFirst(g, i, foes.filter(reaches));
+  }
+  if (unloaded(g, c.who)) return [];
   const hands = [0, 2, 3].map((h) => g.s.members[c.who].equips[h]).filter((w) => strikes(g, w));
   if (!hands.length)
     return nearestFirst(
@@ -2013,17 +2055,19 @@ export function snapTargets(g: Game, i: number): number[] {
 }
 
 /**
- * Those of the party's side a stray from member combatant `i`'s snap attack at foe `j` might strike: about the foe,
+ * Those of the party's side a stray from combatant `i`'s snap attack at foe `j` might strike: about the foe,
  * where a hand's shot or throw that reaches it would land if it missed (strays, atStrayRisk).
  */
 function snapRisks(g: Game, i: number, j: number): number[] {
   const c = g.combat[i];
+  // A creature's shot flies on when it misses, as an arrow does; its blow goes nowhere.
+  if (!(c.flags & CF.Player)) return creatureReach(g, c.who) > 1 ? atStrayRisk(g, i, j) : [];
   const hands = [0, 2, 3].map((h) => g.s.members[c.who].equips[h]).filter((w) => strikes(g, w));
   return hands.some((w) => strays(g, w) && reachesFoe(g, i, w, j, false)) ? atStrayRisk(g, i, j) : [];
 }
 
 /**
- * The foe member combatant `i`'s snap attack opens on: the one they last struck or chose (Game.snapMemory) while it
+ * The foe combatant `i`'s snap attack opens on: the one they last struck or chose (Game.snapMemory) while it
  * is still one to open on, else the nearest a stray could not carry into a friend, else the nearest (snapTargets);
  * -1 where there is none.
  */
@@ -2034,15 +2078,21 @@ export function snapTarget(g: Game, i: number): number {
   return list.find((j) => !snapRisks(g, i, j).length) ?? list[0];
 }
 
-/** The foe member combatant `i` has struck - `at`, or where the crosshair was - theirs to open on again (snapTarget). */
-function rememberFoe(g: Game, i: number, at = -1): void {
-  if ((g.combat[i].flags & CF.Player) === 0) return;
+/**
+ * The foe combatant `i` (a member, or a creature on the party's side) has struck - `at`, or where the crosshair was - theirs
+ * to open on again (snapTarget); `byHand`, chosen with the crosshair, it stays theirs in the dark (standingFoe).
+ */
+export function rememberFoe(g: Game, i: number, at = -1, byHand = false): void {
   const j = at >= 0 ? at : combatantAt(g, g.s.crossX, g.s.crossY);
-  if (j >= 0 && j !== i && onMonsterSide(g, j)) g.snapMemory[i] = j;
+  if (j >= 0 && j !== i && onMonsterSide(g, j)) {
+    // Struck again by a snap attack, a foe chosen by hand stays so.
+    g.snapByHand[i] = byHand || (g.snapByHand[i] && g.snapMemory[i] === j);
+    g.snapMemory[i] = j;
+  }
 }
 
 /**
- * LB or RB at a fight's prompt (input.ts getCommandKey): the member's snap target one on (`step` 1) or back (-1),
+ * LB or RB at a fight's prompt (input.ts getCommandKey): the snap target of whoever's turn it is one on (`step` 1) or back (-1),
  * round from the last to the first; theirs from then on (snapMemory). No turn is spent.
  */
 export function cycleSnap(g: Game, step: number): void {
@@ -2050,7 +2100,10 @@ export function cycleSnap(g: Game, step: number): void {
   const list = snapTargets(g, i);
   if (!list.length) return;
   const at = list.indexOf(snapTarget(g, i));
-  g.snapMemory[i] = list[(at + step + list.length) % list.length];
+  const next = list[(at + step + list.length) % list.length];
+  // Stepped off, a foe chosen by hand in the dark is let go (the shoulders step only between foes in sight).
+  g.snapByHand[i] &&= g.snapMemory[i] === next;
+  g.snapMemory[i] = next;
   updateFrame(g);
 }
 
@@ -2088,7 +2141,7 @@ function stepAim(g: Game, i: number, range: number, friend: boolean, step: numbe
     const c = g.combat[j];
     if (friend) {
       if (c.flags && !(c.flags & (CF.Dead | CF.Invisible)) && !onMonsterSide(g, j) && combatantAt(g, c.x, c.y) === j) list.push(j);
-    } else if (standingFoe(g, j)) list.push(j);
+    } else if (standingFoe(g, j, i)) list.push(j);
   }
   if (!list.length) return;
   nearestFirst(g, i, list);
@@ -2641,8 +2694,12 @@ async function escape(g: Game): Promise<number> {
     if (leave)
       g.say(0x8ea6); // "Leave!\n"
     else g.printChar('!');
+    // A creature on the party's side escaping once every member has left the field, the foes still standing: it goes,
+    // and the fight ends as the members' flight - not with the foes swept off the field too, a victory (the port's;
+    // the DOS game's took everyone, and a dungeon's room was cleared by it).
+    const flight = !anyone && s.battleWon === 0;
     for (let i = 0; i < 0x20; i++) {
-      if (g.combat[i].flags !== 0) {
+      if (g.combat[i].flags !== 0 && !(flight && onMonsterSide(g, i))) {
         removeCombatant(g, -i - 1);
         updateFrame(g);
       }
@@ -3010,6 +3067,7 @@ export async function combatLoop(g: Game): Promise<boolean> {
   g.fightOdds = { foes: s.dx, party: s.dy }; // the sides as it begins (modernKarma.ts battleOutcome)
   // A fight's own: no snap target yet, and a tip to come (combatTip).
   g.snapMemory.fill(-1);
+  g.snapByHand.fill(false);
   g.fightTipped = false;
   musicForMap(g);
   for (;;) {
@@ -3539,6 +3597,18 @@ export async function campOutdoors(g: Game, guard: number, hours: number): Promi
  * Standard look marks the turn's square with the ultima3 Standard outline, which stays (nothing blinks).
  */
 export function drawCombatMarks(g: Game): void {
+  // A box over the view (a menu, the townsman's words): the marks keep out of it, as the squares it covers are left
+  // undrawn (world.ts covered) - the snap target's arrows and a friend's warning showed through the command menu.
+  const d = g.draw;
+  d.mask?.(g.covers.size > 0 ? [...g.covers.values()] : null);
+  try {
+    combatMarks(g);
+  } finally {
+    d.mask?.(null);
+  }
+}
+
+function combatMarks(g: Game): void {
   const s = g.s;
   const d = g.draw;
   const marks = g.options.tileSet === 'standard' && d.aim !== undefined;
@@ -3557,8 +3627,11 @@ export function drawCombatMarks(g: Game): void {
   const standard = g.options.tileSet === 'standard' && d.marker !== undefined;
   s.blink = s.blink ? 0 : 1;
   const c = g.combat[s.combatTurn];
-  // In the colour of the member's bar in the party panel: their state's, else their hit points', else white.
-  if (standard && s.combatTurn !== 0xff && !onMonsterSide(g, s.combatTurn)) d.marker!(c.x, c.y, turnColour(g, c.who));
+  // In the colour of the member's bar in the party panel: their state's, else their hit points', else white. A creature
+  // summoned or charmed to the party's side has no bar - its `who` is what it is, not a member - and is marked white.
+  if (standard && s.combatTurn !== 0xff && !onMonsterSide(g, s.combatTurn)) {
+    d.marker!(c.x, c.y, c.flags & CF.Player ? turnColour(g, c.who) : Colour.brightWhite);
+  }
   // The foe an X would strike: the crosshair's mark, small (snapMark) - over the turn's outline, a foe beside them.
   const snap = marks ? snapMark(g) : -1;
   if (snap >= 0) d.aim!(g.combat[snap].x, g.combat[snap].y, 'attack', true);
