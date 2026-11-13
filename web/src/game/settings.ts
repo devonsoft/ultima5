@@ -224,7 +224,7 @@ export type TileSet = 'standard' | 'original';
  * 'original') has a choice of its own (PcTiles).
  */
 export type Tiles = 'modern-pc' | 'apple2' | 'pc-ega' | 'sharp';
-export const TILES: readonly Tiles[] = ['modern-pc', 'apple2', 'pc-ega', 'sharp'];
+export const TILES: readonly Tiles[] = ['modern-pc', 'apple2', 'sharp', 'pc-ega'];
 /** The PC (1988) look's tiles: the EGA tiles as the game drew them, or the Apple ][ set's in their place. */
 export type PcTiles = Extract<Tiles, 'pc-ega' | 'apple2' | 'sharp'>;
 export const PC_TILES: readonly PcTiles[] = ['pc-ega', 'apple2', 'sharp'];

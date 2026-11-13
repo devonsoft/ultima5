@@ -1914,8 +1914,17 @@ export function settingLines(g: Game, title = false): Setting[] {
           ? "Modern PC: 1988's art redone. Apple ][ and PC EGA: as first drawn."
           : "PC EGA: the 1988 game's tiles. Apple ][: the Apple II's, as first drawn.",
       act: () => {
-        if (o.tileSet === 'standard') o.tiles = TILES[(TILES.indexOf(o.tiles) + 1) % TILES.length];
-        else o.pcTiles = PC_TILES[(PC_TILES.indexOf(o.pcTiles) + 1) % PC_TILES.length];
+        if (o.tileSet === 'standard') {
+          o.tiles = TILES[(TILES.indexOf(o.tiles) + 1) % TILES.length];
+          // Frustrated when I switch between modern and pc and it doesnt keep the same tiles
+          if (o.tiles != 'modern-pc') {
+            o.pcTiles = o.tiles;
+          }
+        }
+        else {
+          o.pcTiles = PC_TILES[(PC_TILES.indexOf(o.pcTiles) + 1) % PC_TILES.length];
+          o.tiles = o.pcTiles;
+        }
       },
     },
     {
