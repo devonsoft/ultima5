@@ -365,6 +365,10 @@ the player's own copy.
   Origin Systems for the Apple II version (1988), read off its Program
   disk by `npm run apple2` (`web/tools/art/apple2.ts`). They remain their
   owners'.
+  - **The Sharp X68000 tiles** of the Sharp X68000 and PC-98 tile set
+  (`web/public/graphics/sharp-x86000-u5-tiles.png`): Ultima V's own, drawn by
+  Infinity Co., Ltd. for the Pony Canyon published Sharp X68000 and PC-98 Japanese versions (1990), downloaded from https://wiki.ultimacodex.com/wiki/Ultima_V_internal_formats. They remain their
+  owners'.
 - **LairWare**, and Leon McNeill, whose Macintosh port of Ultima III,
   and its source ([beastie/ultima3](https://github.com/beastie/ultima3)), posted in 2025, the ultima3 port grew from - and so,
   through it, this one. Thank you.
